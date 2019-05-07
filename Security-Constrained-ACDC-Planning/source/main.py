@@ -122,38 +122,40 @@ class BusInfo(object):
 
 # This class restores the results of planning problem
 class Result_Planning(object):
+    # Initialization
     def __init__(self,model,Para):
-        # Initialization
-        self.x_line = np.zeros((Para.N_line, Para.N_type_line))
-        self.x_conv = np.zeros((Para.N_conv, Para.N_type_conv))
-        self.x_sub  = np.zeros((Para.N_sub , Para.N_type_sub ))
-        self.y_line = np.zeros((Para.N_line, Para.N_scene, Para.N_year))
-        self.f_line = np.zeros((Para.N_line, Para.N_scene, Para.N_year))
-        self.f_conv = np.zeros((Para.N_conv, Para.N_scene, Para.N_year))
-        self.f_sub  = np.zeros((Para.N_sub , Para.N_scene, Para.N_year))
-        self.f_load = np.zeros((Para.N_bus , Para.N_scene, Para.N_year))
-        self.f_gen  = np.zeros((Para.N_gen , Para.N_scene, Para.N_year))
-        self.var    = np.zeros((N_N_var    , Para.N_hour, Para.N_scene, Para.N_year))
-        # Data
-        variable = model.getVars()
-        variable = [variable[i].x for i in range(len(variable))]
-        for n in range(Para.N_line):
-            for k in range(Para.N_type_line):
-                self.x_line[n,k] = int(round(variable.pop(0)))
-        for n in range(Para.N_conv):
-            for k in range(Para.N_type_conv):
-                self.x_conv[n,k] = int(round(variable.pop(0)))
-        for n in range(Para.N_sub ):
-            for k in range(Para.N_type_sub ):
-                self.x_sub [n,k] = int(round(variable.pop(0)))
-        for n in range(Para.N_line):
-            for s in range(Para.N_scene):
-                for t in range(Para.N_year):
-                    self.y_line[n,s,t] = int(round(variable.pop(0)))
-        for n in range(Para.N_line):
-            for s in range(Para.N_scene):
-                for t in range(Para.N_year):
-                    self.y_line[n,s,t] = int(round(variable.pop(0)))
+        self.x_line = self.value(model._x_line,'int')
+        self.x_conv = self.value(model._x_conv,'int')
+        self.x_sub  = self.value(model._x_sub ,'int')
+        self.y_line = self.value(model._y_line,'int')
+        self.var    = self.value(model._var   ,'con')
+        self.V_bus  = (self.var)[N_V_bus  : N_V_bus  + Para.N_bus ,:,:,:]
+        self.P_line = (self.var)[N_P_line : N_P_line + Para.N_line,:,:,:]
+        self.Q_line = (self.var)[N_Q_line : N_Q_line + Para.N_line,:,:,:]
+        self.P_conv = (self.var)[N_P_conv : N_P_conv + Para.N_conv,:,:,:]
+        self.Q_conv = (self.var)[N_Q_conv : N_Q_conv + Para.N_conv,:,:,:]
+        self.P_sub  = (self.var)[N_P_sub  : N_P_sub  + Para.N_sub ,:,:,:]
+        self.Q_sub  = (self.var)[N_Q_sub  : N_Q_sub  + Para.N_sub ,:,:,:]
+        self.C_load = (self.var)[N_C_load : N_C_load + Para.N_bus ,:,:,:]
+        self.S_gen  = (self.var)[N_S_gen  : N_S_gen  + Para.N_gen ,:,:,:]
+        self.C_gen  = (self.var)[N_C_gen  : N_C_gen  + Para.N_gen ,:,:,:]
+    # Convert gurobi tuplelist to array
+    def value(self,var,string = 'con'):
+        # Get value
+        key = var.keys()
+        val = var.copy()
+        for i in range(len(key)):
+            if string == 'int':
+                val[key[i]] = int(round(var[key[i]].x))
+            else:
+                val[key[i]] = var[key[i]].x
+        # Convert dictionary to numpy array
+        dim = tuple([item + 1 for item in max(key)])  # dimention
+        arr = np.zeros(dim)
+        for i in range(len(val)):
+            arr[key[i]] = val[key[i]]
+        return arr
+
             
 
         
@@ -243,6 +245,10 @@ def Func_Planning(Para,Info):
     var    = model.addVars(N_N_var, Para.N_hour, Para.N_scene, Para.N_year, lb = -1e8)
     # Update in model
     model._x_line = x_line
+    model._x_conv = x_conv
+    model._x_sub  = x_sub
+    model._y_line = y_line
+    model._var    = var
 
     # Set objective
     obj_normal = model.addVar()
@@ -276,6 +282,16 @@ def Func_Planning(Para,Info):
     # Total cost under normal condition
     model.addConstr(obj_normal == inv + opr * Para.N_time)
 
+    # Constraint 0 (installation)
+    for t in range(Para.N_year):
+        for s in range(Para.N_scene):
+            for n in range(Para.N_line):
+                if Para.Line[n,6] == 0:  # AC line
+                    model.addConstr(x_line[n,2] == 0)
+                if Para.Line[n,6] == 1:  # DC line
+                    model.addConstr(x_line[n,1] == 0)
+                    model.addConstr(x_line[n,0] == 0)
+    
     # Constraint 1 (reconfiguration)
     for t in range(Para.N_year):
         for s in range(Para.N_scene):
@@ -305,10 +321,9 @@ def Func_Planning(Para,Info):
             for n in range(Para.N_gen):
                 model.addConstr(f_gen [n,s,t] == -1)
 
-    # Constraint 3 (radial topology)
+    # Constraint 3 (connectivity)
     for t in range(Para.N_year):
         for s in range(Para.N_scene):
-            # connectivity
             for n in range(Para.N_bus):
                 line_head = Info.Line_head[n]
                 line_tail = Info.Line_tail[n]
@@ -327,7 +342,10 @@ def Func_Planning(Para,Info):
                     bus_no = int(np.where(n == Para.Gen[:,1])[0])
                     expr = expr + f_gen[bus_no,s,t]
                 model.addConstr(expr == 0)
-            # radiality
+    
+    # Constraint 4 (radial topology)
+    for t in range(Para.N_year):
+        for s in range(Para.N_scene):
             expr = LinExpr()
             expr = expr + Para.N_bus_AC
             expr = expr - quicksum(y_line[i,s,t] for i in Para.Line_AC[:,0])
