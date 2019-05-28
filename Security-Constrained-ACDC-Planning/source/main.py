@@ -445,19 +445,19 @@ def Func_Planning(Para,Info):
                     model.addConstr(expr == Para.Gen[n,2] * punit[gen_type + 1])
 
                 # 5.Lower and upper bounds
-                for n in range(Para.N_bus):   # voltage
+                for n in range(Para.N_bus):   # 1) voltage
                     V_low = (Para.Bus[n,1] * Para.Volt_low) ** 2
                     V_upp = (Para.Bus[n,1] * Para.Volt_upp) ** 2
                     model.addConstr(v_flow[N_V_bus  + n,h,s,t] >= V_low)
                     model.addConstr(v_flow[N_V_bus  + n,h,s,t] <= V_upp)
-                for n in range(Para.N_line):  # current
+                for n in range(Para.N_line):  # 2) current
                     expr = LinExpr()
                     expr = expr + Para.Line[n,4] * Para.Line[n,5] / Para.Line[n,6]
                     for k in range(Para.N_type_line):
                         expr = expr + x_line[n,k] * Para.Cdd_line[k,4]
                     model.addConstr(v_flow[N_I_line + n,h,s,t] >= -expr)
                     model.addConstr(v_flow[N_I_line + n,h,s,t] <=  expr)
-                for n in range(Para.N_line):  # active power
+                for n in range(Para.N_line):  # 3) active power
                     expr = LinExpr()
                     expr = expr + Para.Line[n,4] * Para.Line[n,5]
                     for k in range(Para.N_type_line):
@@ -466,7 +466,7 @@ def Func_Planning(Para,Info):
                     model.addConstr(v_flow[N_P_line + n,h,s,t] <=  expr)
                     model.addConstr(v_flow[N_P_line + n,h,s,t] >= -y_line[n,s,t] * Para.Big_M)
                     model.addConstr(v_flow[N_P_line + n,h,s,t] <=  y_line[n,s,t] * Para.Big_M)
-                for n in range(Para.N_line):  # reactive power
+                for n in range(Para.N_line):  # 4) reactive power
                     expr = LinExpr()
                     expr = expr + Para.Line[n,4] * Para.Line[n,5]
                     for k in range(Para.N_type_line):
@@ -477,7 +477,19 @@ def Func_Planning(Para,Info):
                     model.addConstr(v_flow[N_Q_line + n,h,s,t] <=  y_line[n,s,t] * Para.Big_M)
                     if Para.Line[n,7] == 1:
                         model.addConstr(v_flow[N_Q_line + n,h,s,t] == 0)
-                
+                for n in range(Para.N_conv):  # 5) converter
+                    expr = LinExpr()
+                    for k in range(Para.N_type_conv):
+                        expr = expr + x_conv[n,k] * Para.Cdd_conv[k,0]
+                    model.addConstr(v_flow[N_P_conv + n,h,s,t] >= -expr)
+                    model.addConstr(v_flow[N_P_conv + n,h,s,t] <=  expr)
+                    model.addConstr(v_flow[N_Q_conv + n,h,s,t] >= -expr)
+                    model.addConstr(v_flow[N_Q_conv + n,h,s,t] <=  expr)
+                for n in range(Para.N_sub):
+                    expr = LinExpr()
+                    expr = expr + Para.Sub[n,2]
+                    for k in range(Para.N_type_sub):
+                        expr = expr + x_sub[n,k] * Para.Cdd_sub[k,0]
     
 
     model.addConstr(opr == 0)
