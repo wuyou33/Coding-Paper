@@ -26,9 +26,9 @@ from gurobipy import *
 class Parameter(object):
     def __init__(self,Data):
         # System
-        self.N_year   = 5     # number of year
-        self.N_scene  = 16    # number of reconfiguration scenario
-        self.N_hour   = 6     # number of hour in each scenario
+        self.N_year   = 1     # number of year
+        self.N_scene  = 1    # number of reconfiguration scenario
+        self.N_hour   = 1     # number of hour in each scenario
         self.N_time   = 90    # number of times
         self.I_rate   = 0.05  # interest rate
         self.Big_M    = 2500  # a sufficient large number M
@@ -50,8 +50,8 @@ class Parameter(object):
         self.Cost_load_cut = 150  # cost of load curtailment
         # Line
         self.Line = Data[2]
-        self.Line_AC = self.Line[np.where(self.Line[:,6] == 0)]  # AC line
-        self.Line_DC = self.Line[np.where(self.Line[:,6] == 1)]  # DC line
+        self.Line_AC = self.Line[np.where(self.Line[:,7] == 0)]  # AC line
+        self.Line_DC = self.Line[np.where(self.Line[:,7] == 1)]  # DC line
         self.N_line = len(self.Line)  # number of line
         self.N_line_AC = len(self.Line_AC)  # number of AC line
         self.N_line_DC = len(self.Line_DC)  # number of DC line
@@ -122,12 +122,12 @@ class BusInfo(object):
 # This class restores the results of planning problem
 class Result_Planning(object):
     # Initialization
-    def __init__(self,model,Para):
+    def __init__(self, model, Para):
         self.x_line = self.value(model._x_line, 'int')
         self.x_conv = self.value(model._x_conv, 'int')
         self.x_sub  = self.value(model._x_sub , 'int')
         self.y_line = self.value(model._y_line, 'int')
-        self.v_flow = self.value(model._v_flow, 'con')
+        self.v_flow = self.value(model._v_flow, 'float')
         self.V_bus  = (self.v_flow)[N_V_bus  : N_V_bus  + Para.N_bus ,:,:,:]
         self.I_line = (self.v_flow)[N_I_line : N_I_line + Para.N_line,:,:,:]
         self.P_line = (self.v_flow)[N_P_line : N_P_line + Para.N_line,:,:,:]
@@ -140,18 +140,15 @@ class Result_Planning(object):
         self.S_gen  = (self.v_flow)[N_S_gen  : N_S_gen  + Para.N_gen ,:,:,:]
         self.C_gen  = (self.v_flow)[N_C_gen  : N_C_gen  + Para.N_gen ,:,:,:]
     # Convert gurobi tuplelist to array
-    def value(self,v_flow,string):
+    def value(self, v_flow, string):
         # Get value
         key = v_flow.keys()
         val = v_flow.copy()
         for i in range(len(key)):
-            if string == 'int':
-                val[key[i]] = int(round(v_flow[key[i]].x))
-            if string == 'con':
-                val[key[i]] = v_flow[key[i]].x
+            val[key[i]] = v_flow[key[i]].x
         # Convert dictionary to numpy array
         dim = tuple([item + 1 for item in max(key)])  # dimention
-        arr = np.zeros(dim)
+        arr = np.zeros(dim, dtype = string)
         for i in range(len(val)):
             arr[key[i]] = val[key[i]]
         return arr
@@ -196,7 +193,7 @@ def ReadData(filename,num):
         if i < num-1:
             Coordinate = [1,n_row,0,n_col]
         else:
-            Coordinate = [2,n_row,0,n_col]
+            Coordinate = [2,n_row,1,n_col]
         Data.append(np.array(Matrix_slice(d_cel,Coordinate)))
     return Data
 
@@ -226,7 +223,7 @@ def Depreciation(life,rate):
 # This function creates the master planning model
 # 
 def Func_Planning(Para,Info):
-    # ------------------------------Initialization------------------------------
+    '''------------------------------Initialization------------------------------'''
     # Index
     Index_TS = np.zeros((Para.N_year * Para.N_scene,2))
     Index_TH = np.zeros((Para.N_year * Para.N_scene * Para.N_hour,3))
@@ -268,8 +265,8 @@ def Func_Planning(Para,Info):
     # Set objective
     obj_normal = model.addVar()
     obj_fault  = model.addVar()
-
-    # ------------------------------Investment Model------------------------------
+    
+    '''------------------------------Investment Model------------------------------'''
     # Investment cost
     inv = LinExpr()
     for t in range(Para.N_year):
@@ -293,13 +290,12 @@ def Func_Planning(Para,Info):
         if Para.Line[n,7] == 0:  # AC line
             model.addConstr(x_line[n,2] == 0)
         if Para.Line[n,7] == 1:  # DC line
-            model.addConstr(x_line[n,1] == 0)
-            model.addConstr(x_line[n,0] == 0)
+            model.addConstr(x_line[n,0] + x_line[n,1] == 0)
     
     # Constraint 1 (reconfiguration)
-    for index in range(Index_TS):
-        t = Index_TS[index,0]
-        s = Index_TS[index,1]
+    for index in range(len(Index_TS)):
+        t = int(Index_TS[index,0])
+        s = int(Index_TS[index,1])
         for n in range(Para.N_line):
             if Para.Line[n,5] > 0:
                 model.addConstr(y_line[n,s,t] <= 1)
@@ -307,9 +303,9 @@ def Func_Planning(Para,Info):
                 model.addConstr(y_line[n,s,t] <= x_line.sum(n,'*'))
     
     # Constraint 2 (fictitious power flow)
-    for index in range(Index_TS):
-        t = Index_TS[index,0]
-        s = Index_TS[index,1]
+    for index in range(len(Index_TS)):
+        t = int(Index_TS[index,0])
+        s = int(Index_TS[index,1])
         for n in range(Para.N_bus):
             if Para.Load[n,t+1] == 0:
                 model.addConstr(f_load[n,s,t] == 0)
@@ -322,15 +318,15 @@ def Func_Planning(Para,Info):
             model.addConstr(f_conv[n,s,t] >= -1e2 * x_conv.sum(n,'*'))
             model.addConstr(f_conv[n,s,t] <=  1e2 * x_conv.sum(n,'*'))
         for n in range(Para.N_sub):
-            model.addConstr(f_sub[n,s,t] >=  0)
-            model.addConstr(f_sub[n,s,t] <=  1e2)
+            model.addConstr(f_sub [n,s,t] >=  0)
+            model.addConstr(f_sub [n,s,t] <=  1e2)
         for n in range(Para.N_gen):
             model.addConstr(f_gen [n,s,t] == -1)
     
     # Constraint 3 (connectivity)
-    for index in range(Index_TS):
-        t = Index_TS[index,0]
-        s = Index_TS[index,1]
+    for index in range(len(Index_TS)):
+        t = int(Index_TS[index,0])
+        s = int(Index_TS[index,1])
         for n in range(Para.N_bus):
             line_head = Info.Line_head[n]
             line_tail = Info.Line_tail[n]
@@ -351,22 +347,22 @@ def Func_Planning(Para,Info):
             model.addConstr(expr == 0)
     
     # Constraint 4 (radial topology)
-    for index in range(Index_TS):
-        t = Index_TS[index,0]
-        s = Index_TS[index,1]
+    for index in range(len(Index_TS)):
+        t = int(Index_TS[index,0])
+        s = int(Index_TS[index,1])
         expr = LinExpr()
         expr = expr + Para.N_bus_AC
         expr = expr - Para.N_sub
         expr = expr - quicksum(y_line[i,s,t] for i in Para.Line_AC[:,0])
         model.addConstr(expr == 0)
     
-    # ------------------------------Operating Model------------------------------
+    '''------------------------------Operating Model------------------------------'''
     # Operating cost
     opr = LinExpr()
-    for index in range(Index_TH):
-        t = Index_TS[index,0]
-        s = Index_TS[index,1]
-        h = Index_TS[index,2]
+    for index in range(len(Index_TH)):
+        t = int(Index_TH[index,0])
+        s = int(Index_TH[index,1])
+        h = int(Index_TH[index,2])
         for n in range(Para.N_sub):  # power purchasing
             opr = opr + v_flow[N_P_sub  + n,h,s,t] * Para.Cost_load_buy
         for n in range(Para.N_bus):   # load shedding
@@ -376,11 +372,11 @@ def Func_Planning(Para,Info):
             opr = opr + v_flow[N_S_gen  + n,h,s,t] * Para.Cost_gen_out[gen_type]
             opr = opr + v_flow[N_C_gen  + n,h,s,t] * Para.Cost_gen_cut[gen_type]
     
-    # Constraint 5 (optimal power flow)
-    for index in range(Index_TH):
-        t = Index_TS[index,0]
-        s = Index_TS[index,1]
-        h = Index_TS[index,2]
+    # Constraint 0 (optimal power flow)
+    for index in range(len(Index_TH)):
+        t = int(Index_TH[index,0])
+        s = int(Index_TH[index,1])
+        h = int(Index_TH[index,2])
         # 0.data of unit
         n_row = math.floor(s%4) * 6 + h
         n_col = math.floor(s/4) * 4
@@ -411,8 +407,8 @@ def Func_Planning(Para,Info):
             if n in Para.Gen[:,1]:  # active power input from renewables
                 i = int(np.where(n == Para.Gen[:,1])[0])
                 expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
-            model.addConstr(expr == Para.Load[n,t] * punit[0] * factor)
-
+            model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor)
+        
         # 2.nodal reactive power balance
         for n in range(Para.N_bus):
             # Bus-Branch information
@@ -438,8 +434,8 @@ def Func_Planning(Para,Info):
             if n in Para.Gen[:,1]:  # reactive power input from renewables
                 i = int(np.where(n == Para.Gen[:,1])[0])
                 expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
-            model.addConstr(expr == Para.Load[n,t] * punit[0] * factor)
-        
+            model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor)
+        '''
         # 3.Voltage balance on line
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
@@ -452,9 +448,9 @@ def Func_Planning(Para,Info):
             expr = expr - v_flow[N_P_line + n,h,s,t] * 2 * R
             expr = expr - v_flow[N_Q_line + n,h,s,t] * 2 * X
             expr = expr + v_flow[N_I_line + n,h,s,t] * (R**2 + X**2)
-            model.addConstr(expr >= -Big_M * (1 - y_line[n]))
-            model.addConstr(expr <=  Big_M * (1 - y_line[n]))
-        
+            model.addConstr(expr >= -Big_M * (1 - y_line[n,s,t]))
+            model.addConstr(expr <=  Big_M * (1 - y_line[n,s,t]))
+        '''
         # 4.Renewable generation
         for n in range(Para.N_gen):
             expr = LinExpr()
@@ -462,21 +458,25 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_C_gen + n,h,s,t]
             gen_type = int(Para.Gen[n,3])
             model.addConstr(expr == Para.Gen[n,2] * punit[gen_type + 1])
-
+        
         # 5.Lower and upper bounds
-        for n in range(Para.N_bus):   # 1) voltage
+        # 1) voltage
+        for n in range(Para.N_bus): 
             V_low = (Para.Bus[n,1] * Para.Volt_low) ** 2
             V_upp = (Para.Bus[n,1] * Para.Volt_upp) ** 2
             model.addConstr(v_flow[N_V_bus  + n,h,s,t] >= V_low)
             model.addConstr(v_flow[N_V_bus  + n,h,s,t] <= V_upp)
-        for n in range(Para.N_line):  # 2) current
+        # 2) current
+        for n in range(Para.N_line):
             expr = LinExpr()
             expr = expr + Para.Line[n,4] * Para.Line[n,5] / Para.Line[n,6]
             for k in range(Para.N_type_line):
                 expr = expr + x_line[n,k] * Para.Cdd_line[k,4]
             model.addConstr(v_flow[N_I_line + n,h,s,t] >= -expr)
             model.addConstr(v_flow[N_I_line + n,h,s,t] <=  expr)
-        for n in range(Para.N_line):  # 3) active power
+        
+        # 3) active power
+        for n in range(Para.N_line):
             expr = LinExpr()
             expr = expr + Para.Line[n,4] * Para.Line[n,5]
             for k in range(Para.N_type_line):
@@ -485,7 +485,9 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_P_line + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_P_line + n,h,s,t] >= -y_line[n,s,t] * Big_M)
             model.addConstr(v_flow[N_P_line + n,h,s,t] <=  y_line[n,s,t] * Big_M)
-        for n in range(Para.N_line):  # 4) reactive power
+        
+        # 4) reactive power
+        for n in range(Para.N_line):
             expr = LinExpr()
             expr = expr + Para.Line[n,4] * Para.Line[n,5]
             for k in range(Para.N_type_line):
@@ -496,7 +498,9 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_Q_line + n,h,s,t] <=  y_line[n,s,t] * Big_M)
             if Para.Line[n,7] == 1:
                 model.addConstr(v_flow[N_Q_line + n,h,s,t] == 0)
-        for n in range(Para.N_conv):  # 5) converter
+        
+        # 5) converter
+        for n in range(Para.N_conv):
             expr = LinExpr()
             for k in range(Para.N_type_conv):
                 expr = expr + x_conv[n,k] * Para.Cdd_conv[k,0]
@@ -504,6 +508,8 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_P_conv + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_Q_conv + n,h,s,t] >= -expr)
             model.addConstr(v_flow[N_Q_conv + n,h,s,t] <=  expr)
+        
+        # 6) substation
         for n in range(Para.N_sub):
             expr = LinExpr()
             expr = expr + Para.Sub[n,2]
@@ -513,24 +519,35 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_P_sub  + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_Q_sub  + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_Q_sub  + n,h,s,t] <=  expr)
+        
+        # 7) load shedding
         for n in range(Para.N_bus):
             model.addConstr(v_flow[N_C_load + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_C_load + n,h,s,t] <=  Para.Load[n,t] * punit[0])
+        '''
+        # 8) renewables
         for n in range(Para.N_gen):
             gen_type = int(Para.Gen[n,3])
             expr = Para.Gen[n,2] * punit[gen_type + 1]
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] <=  expr)
-    
+            model.addConstr(v_flow[N_C_gen  + n,h,s,t] >=  0)
+            model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
+        '''
     # Set objective
     model.addConstr(obj_normal == inv + opr * Para.N_time)
     model.addConstr(opr == 0)
     model.setObjective(obj_normal, GRB.MINIMIZE)
     # Set parameters
-    model.setParam("MIPGap", 0.025)
+    model.setParam("MIPGap", 0.05)
     # Optimize
     model.optimize()
     if model.status == GRB.Status.OPTIMAL:
+        model._x_line = x_line
+        model._x_conv = x_conv
+        model._x_sub  = x_sub
+        model._y_line = y_line
+        model._v_flow = v_flow
         result = Result_Planning(model,Para)
         Plot.Reconfig(Para,result,0,0)
         return result
@@ -604,8 +621,15 @@ if __name__ == "__main__":
     ub   = []  # upper bound
 
     # Main function
-    for k in range(Iter):
-        Res_Planning = Func_Planning(Para,Info)
+    # for k in range(Iter):
+    Res_Planning = Func_Planning(Para,Info)
+    # Save results
+    with open('result/result.csv', 'w', newline = '') as f:
+        writer = csv.writer(f)
+        writer.writerows(Res_Planning.x_line.tolist())
+        writer.writerows(Res_Planning.x_conv.tolist())
+        writer.writerows(Res_Planning.x_sub .tolist())
+        writer.writerows(Res_Planning.y_line.tolist())
 
     
     n = 1
