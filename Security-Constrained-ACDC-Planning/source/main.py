@@ -440,8 +440,12 @@ def Func_Planning(Para,Info):
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
             bus_tail = Para.Line[n,2]
-            R = Para.Cdd_line[0,2] * Para.Line[i,2]
-            X = Para.Cdd_line[0,3] * Para.Line[i,3]
+            if Para.Line[n,7] == 0:
+                R = Para.Cdd_line[0,2] * Para.Line[n,2]
+                X = Para.Cdd_line[0,3] * Para.Line[n,3]
+            else:
+                R = Para.Cdd_line[2,2] * Para.Line[n,2]
+                X = Para.Cdd_line[2,3] * Para.Line[n,3]
             expr = LinExpr()
             expr = expr + v_flow[N_V_bus + bus_head,h,s,t]
             expr = expr - v_flow[N_V_bus + bus_tail,h,s,t]
@@ -538,7 +542,7 @@ def Func_Planning(Para,Info):
     model.addConstr(obj_normal == inv + opr * Para.N_time)
     model.setObjective(obj_normal, GRB.MINIMIZE)
     # Set parameters
-    model.setParam("MIPGap", 0.06)
+    model.setParam("MIPGap", 0.01)
     # Optimize
     model.optimize()
     if model.status == GRB.Status.OPTIMAL:
