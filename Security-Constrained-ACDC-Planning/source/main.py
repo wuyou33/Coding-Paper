@@ -435,12 +435,12 @@ def Func_Planning(Para,Info):
                 i = int(np.where(n == Para.Gen[:,1])[0])
                 expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
             model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor)
-        '''
+        
         # 3.Voltage balance on line
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
             bus_tail = Para.Line[n,2]
-            R = Para.Cdd_line[0,3] * Para.Line[i,2]
+            R = Para.Cdd_line[0,2] * Para.Line[i,2]
             X = Para.Cdd_line[0,3] * Para.Line[i,3]
             expr = LinExpr()
             expr = expr + v_flow[N_V_bus + bus_head,h,s,t]
@@ -450,7 +450,7 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_I_line + n,h,s,t] * (R**2 + X**2)
             model.addConstr(expr >= -Big_M * (1 - y_line[n,s,t]))
             model.addConstr(expr <=  Big_M * (1 - y_line[n,s,t]))
-        '''
+        
         # 4.Renewable generation
         for n in range(Para.N_gen):
             expr = LinExpr()
@@ -524,7 +524,7 @@ def Func_Planning(Para,Info):
         for n in range(Para.N_bus):
             model.addConstr(v_flow[N_C_load + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_C_load + n,h,s,t] <=  Para.Load[n,t] * punit[0])
-        '''
+        
         # 8) renewables
         for n in range(Para.N_gen):
             gen_type = int(Para.Gen[n,3])
@@ -533,13 +533,12 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_C_gen  + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
-        '''
+        
     # Set objective
     model.addConstr(obj_normal == inv + opr * Para.N_time)
-    model.addConstr(opr == 0)
     model.setObjective(obj_normal, GRB.MINIMIZE)
     # Set parameters
-    model.setParam("MIPGap", 0.05)
+    model.setParam("MIPGap", 0.06)
     # Optimize
     model.optimize()
     if model.status == GRB.Status.OPTIMAL:
