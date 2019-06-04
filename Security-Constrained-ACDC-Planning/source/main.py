@@ -28,7 +28,7 @@ class Parameter(object):
         # System
         self.N_year   = 1     # number of year
         self.N_scene  = 1    # number of reconfiguration scenario
-        self.N_hour   = 1     # number of hour in each scenario
+        self.N_hour   = 6     # number of hour in each scenario
         self.N_time   = 90    # number of times
         self.I_rate   = 0.05  # interest rate
         self.Big_M    = 2500  # a sufficient large number M
@@ -158,7 +158,7 @@ class Result_Planning(object):
 def GlobalVar(Para):
     # 1.System parameter
     global Big_M
-    Big_M = 2500
+    Big_M = 25000
     # 2.Power flow index
     global N_V_bus, N_I_line, N_P_line, N_Q_line, N_P_conv, N_Q_conv
     global N_P_sub, N_Q_sub , N_C_load, N_S_gen , N_C_gen , N_N_var
@@ -410,7 +410,7 @@ def Func_Planning(Para,Info):
             model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor)
         
         # 2.nodal reactive power balance
-        for n in range(Para.N_bus):
+        for n in range(Para.N_bus_AC):
             # Bus-Branch information
             if Para.Bus[n,4] == 0: factor = math.cos(Para.Factor)  # AC bus
             if Para.Bus[n,4] == 1: factor = 0                      # DC bus
@@ -435,7 +435,7 @@ def Func_Planning(Para,Info):
                 i = int(np.where(n == Para.Gen[:,1])[0])
                 expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
             model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor)
-        
+        '''
         # 3.Voltage balance on line
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
@@ -454,7 +454,7 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_I_line + n,h,s,t] * (R**2 + X**2)
             model.addConstr(expr >= -Big_M * (1 - y_line[n,s,t]))
             model.addConstr(expr <=  Big_M * (1 - y_line[n,s,t]))
-        
+        '''
         # 4.Renewable generation
         for n in range(Para.N_gen):
             expr = LinExpr()
@@ -466,18 +466,17 @@ def Func_Planning(Para,Info):
         # 5.Lower and upper bounds
         # 1) voltage
         for n in range(Para.N_bus): 
-            V_low = (Para.Bus[n,1] * Para.Volt_low) ** 2
-            V_upp = (Para.Bus[n,1] * Para.Volt_upp) ** 2
-            model.addConstr(v_flow[N_V_bus  + n,h,s,t] >= V_low)
-            model.addConstr(v_flow[N_V_bus  + n,h,s,t] <= V_upp)
+            V_low = (Para.Bus[n,1] * Para.Volt_low)
+            V_upp = (Para.Bus[n,1] * Para.Volt_upp)
+            model.addConstr(v_flow[N_V_bus  + n,h,s,t] >= V_low ** 2)
+            model.addConstr(v_flow[N_V_bus  + n,h,s,t] <= V_upp ** 2)
         # 2) current
+        
         for n in range(Para.N_line):
-            expr = LinExpr()
-            expr = expr + Para.Line[n,4] * Para.Line[n,5] / Para.Line[n,6]
-            for k in range(Para.N_type_line):
-                expr = expr + x_line[n,k] * Para.Cdd_line[k,4]
-            model.addConstr(v_flow[N_I_line + n,h,s,t] >= -expr)
-            model.addConstr(v_flow[N_I_line + n,h,s,t] <=  expr)
+            I_low = (Para.Line[n,4] * Para.Line[n,5] / Para.Line[n,6])
+            I_upp = I_low + Para.Cdd_line[2,4]
+            model.addConstr(v_flow[N_I_line + n,h,s,t] >= y_line[n,s,t] * I_low ** 2)
+            model.addConstr(v_flow[N_I_line + n,h,s,t] <= y_line[n,s,t] * I_upp ** 2)
         
         # 3) active power
         for n in range(Para.N_line):
@@ -489,7 +488,6 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_P_line + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_P_line + n,h,s,t] >= -y_line[n,s,t] * Big_M)
             model.addConstr(v_flow[N_P_line + n,h,s,t] <=  y_line[n,s,t] * Big_M)
-        
         # 4) reactive power
         for n in range(Para.N_line):
             expr = LinExpr()
@@ -502,7 +500,6 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_Q_line + n,h,s,t] <=  y_line[n,s,t] * Big_M)
             if Para.Line[n,7] == 1:
                 model.addConstr(v_flow[N_Q_line + n,h,s,t] == 0)
-        
         # 5) converter
         for n in range(Para.N_conv):
             expr = LinExpr()
@@ -512,7 +509,6 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_P_conv + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_Q_conv + n,h,s,t] >= -expr)
             model.addConstr(v_flow[N_Q_conv + n,h,s,t] <=  expr)
-        
         # 6) substation
         for n in range(Para.N_sub):
             expr = LinExpr()
@@ -523,12 +519,10 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_P_sub  + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_Q_sub  + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_Q_sub  + n,h,s,t] <=  expr)
-        
         # 7) load shedding
         for n in range(Para.N_bus):
             model.addConstr(v_flow[N_C_load + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_C_load + n,h,s,t] <=  Para.Load[n,t] * punit[0])
-        
         # 8) renewables
         for n in range(Para.N_gen):
             gen_type = int(Para.Gen[n,3])
