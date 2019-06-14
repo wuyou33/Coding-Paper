@@ -27,9 +27,9 @@ class Parameter(object):
     def __init__(self,Data):
         # System
         self.N_year   = 1     # number of year
-        self.N_scene  = 1    # number of reconfiguration scenario
-        self.N_hour   = 6     # number of hour in each scenario
-        self.N_time   = 90    # number of times
+        self.N_scene  = 8     # number of reconfiguration scenario
+        self.N_hour   = 1     # number of hour in each scenario
+        self.N_time   = 1080  # number of times
         self.I_rate   = 0.05  # interest rate
         self.Big_M    = 2500  # a sufficient large number M
         self.Factor   = 1.25  # power factor
@@ -65,7 +65,7 @@ class Parameter(object):
         self.Gen = Data[5]
         self.N_gen = len(self.Gen)  # number of renewables
         self.Cost_gen_out = np.array([2.2,1.7,6.7])
-        self.Cost_gen_cut = np.array([0.0,0.0,0.0])
+        self.Cost_gen_cut = np.array([100,100,100])
         # Typical day
         self.Day = Data[6]
         # Depreciation
@@ -152,6 +152,55 @@ class Result_Planning(object):
         for i in range(len(val)):
             arr[key[i]] = val[key[i]]
         return arr
+
+
+# This class restores the 'plot' function
+class PlotFunc(object):
+    def __init__(self,Para):
+        pass
+    def Planning(self,Para,result):
+        x_line = (result.x_line).sum(axis = 1)
+        x_conv = (result.x_conv).sum(axis = 1)
+        for n in range(Para.N_line):
+            if Para.Line[n,5] > 0:  # existing line
+                x_line[n] = 1
+        self.Plot_Figure(Para,x_line,x_conv)
+    def Reconfig(self,Para,result,s,t):
+        y_line = result.y_line[:,s,t]
+        x_conv = (result.x_conv).sum(axis = 1)
+        self.Plot_Figure(Para,y_line,x_conv)
+    def Plot_Figure(self,Para,Line,Conv):
+        x = (Para.Bus[:,2]).copy()
+        y = (Para.Bus[:,3]).copy()
+        for n in range(Para.N_bus):  # Bus
+            if Para.Bus[n,4] == 0:
+                plt.text(x[n]+2,y[n]+2, '%s'%n)
+                plt.plot(x[n],y[n],'r.')
+            if Para.Bus[n,4] == 1:
+                x[n] = x[n] + 200
+                y[n] = y[n] + 25
+                plt.text(x[n]+2,y[n]+2, '%s'%n)
+                plt.plot(x[n],y[n],'b.')
+        for n in range(Para.N_line):  # lines
+            x1 = x[int(round(Para.Line[n,1]))]
+            y1 = y[int(round(Para.Line[n,1]))]
+            x2 = x[int(round(Para.Line[n,2]))]
+            y2 = y[int(round(Para.Line[n,2]))]
+            if Para.Line[n,7] == 0:
+                if Line[n] == 1: plt.plot([x1,x2],[y1,y2],'r-' )
+                if Line[n] == 0: plt.plot([x1,x2],[y1,y2],'r--')
+            if Para.Line[n,7] == 1:
+                if Line[n] == 1: plt.plot([x1,x2],[y1,y2],'b-' )
+                if Line[n] == 0: plt.plot([x1,x2],[y1,y2],'b--')
+        for n in range(Para.N_conv):  # converters
+            head = int(round(Para.Conv[n,1]))
+            tail = int(round(Para.Conv[n,2]))
+            if Conv[n] == 1:
+                plt.plot(x[head],y[head],'rs')
+                plt.plot(x[tail],y[tail],'bs')
+        
+        plt.axis('equal')
+        plt.show()
 
 
 # Global variables
@@ -400,7 +449,7 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_C_load + n,h,s,t] * factor
             for i in line_tail:  # line loss
                 coef = Para.Cdd_line[0,2] * Para.Line[i,3]
-                expr = expr - v_flow[N_I_line + i,h,s,t] * coef
+                # expr = expr - v_flow[N_I_line + i,h,s,t] * coef
             if n in Para.Sub[:,1]:  # active power input from substation
                 i = int(np.where(n == Para.Sub[:,1])[0])
                 expr = expr + v_flow[N_P_sub  + i,h,s,t]
@@ -427,7 +476,7 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_C_load + n,h,s,t] * factor
             for i in line_tail:  # line loss
                 coef = Para.Cdd_line[0,3] * Para.Line[i,3]
-                expr = expr - v_flow[N_I_line + i,h,s,t] * coef
+                # expr = expr - v_flow[N_I_line + i,h,s,t] * coef
             if n in Para.Sub[:,1]:  # reactive power input from substation
                 i = int(np.where(n == Para.Sub[:,1])[0])
                 expr = expr + v_flow[N_Q_sub  + i,h,s,t]
@@ -435,7 +484,7 @@ def Func_Planning(Para,Info):
                 i = int(np.where(n == Para.Gen[:,1])[0])
                 expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
             model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor)
-        '''
+        
         # 3.Voltage balance on line
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
@@ -454,7 +503,7 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_I_line + n,h,s,t] * (R**2 + X**2)
             model.addConstr(expr >= -Big_M * (1 - y_line[n,s,t]))
             model.addConstr(expr <=  Big_M * (1 - y_line[n,s,t]))
-        '''
+        
         # 4.Renewable generation
         for n in range(Para.N_gen):
             expr = LinExpr()
@@ -522,6 +571,7 @@ def Func_Planning(Para,Info):
         # 7) load shedding
         for n in range(Para.N_bus):
             model.addConstr(v_flow[N_C_load + n,h,s,t] >=  0)
+            #model.addConstr(v_flow[N_C_load + n,h,s,t] <=  0)
             model.addConstr(v_flow[N_C_load + n,h,s,t] <=  Para.Load[n,t] * punit[0])
         # 8) renewables
         for n in range(Para.N_gen):
@@ -530,7 +580,8 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_C_gen  + n,h,s,t] >=  0)
-            model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
+            model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  0)
+            #model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
         
     # Set objective
     model.addConstr(obj_normal == inv + opr * Para.N_time)
@@ -546,59 +597,31 @@ def Func_Planning(Para,Info):
         model._y_line = y_line
         model._v_flow = v_flow
         result = Result_Planning(model,Para)
+        # detective(Para,Info,result)
         Plot.Reconfig(Para,result,0,0)
         return result
     else:
         return 0
-    
 
-# This class restores the 'plot' function
-class PlotFunc(object):
-    def __init__(self,Para):
-        pass
-    def Planning(self,Para,result):
-        x_line = (result.x_line).sum(axis = 1)
-        x_conv = (result.x_conv).sum(axis = 1)
-        for n in range(Para.N_line):
-            if Para.Line[n,5] > 0:  # existing line
-                x_line[n] = 1
-        self.Plot_Figure(Para,x_line,x_conv)
-    def Reconfig(self,Para,result,s,t):
-        y_line = result.y_line[:,s,t]
-        x_conv = (result.x_conv).sum(axis = 1)
-        self.Plot_Figure(Para,y_line,x_conv)
-    def Plot_Figure(self,Para,Line,Conv):
-        x = (Para.Bus[:,2]).copy()
-        y = (Para.Bus[:,3]).copy()
-        for n in range(Para.N_bus):  # Bus
-            if Para.Bus[n,4] == 0:
-                plt.text(x[n]+2,y[n]+2, '%s'%n)
-                plt.plot(x[n],y[n],'r.')
-            if Para.Bus[n,4] == 1:
-                x[n] = x[n] + 200
-                y[n] = y[n] + 25
-                plt.text(x[n]+2,y[n]+2, '%s'%n)
-                plt.plot(x[n],y[n],'b.')
-        for n in range(Para.N_line):  # lines
-            x1 = x[int(round(Para.Line[n,1]))]
-            y1 = y[int(round(Para.Line[n,1]))]
-            x2 = x[int(round(Para.Line[n,2]))]
-            y2 = y[int(round(Para.Line[n,2]))]
-            if Para.Line[n,7] == 0:
-                if Line[n] == 1: plt.plot([x1,x2],[y1,y2],'r-' )
-                if Line[n] == 0: plt.plot([x1,x2],[y1,y2],'r--')
-            if Para.Line[n,7] == 1:
-                if Line[n] == 1: plt.plot([x1,x2],[y1,y2],'b-' )
-                if Line[n] == 0: plt.plot([x1,x2],[y1,y2],'b--')
-        for n in range(Para.N_conv):  # converters
-            head = int(round(Para.Conv[n,1]))
-            tail = int(round(Para.Conv[n,2]))
-            if Conv[n] == 1:
-                plt.plot(x[head],y[head],'rs')
-                plt.plot(x[tail],y[tail],'bs')
-        
-        plt.axis('equal')
-        plt.show()
+
+# This function determines the reason of problems
+def detective(Para,Info,result):
+    index = np.where(result.C_load == np.max(result.C_load))
+    i = index[0]  # number of load curtailment
+    h = index[1]  # number of year
+    s = index[2]  # number of reconfiguration scenario
+    t = index[3]  # number of hour in each scenario
+    # 1.Overload of lines
+    overload = []
+    for n in range(Para.N_line):
+        # line flow
+        S_line = np.sqrt(result.P_line[n,h,s,t] ** 2 + result.Q_line[n,h,s,t] ** 2)
+        # upper bound of line flow
+        M_line = Para.Line[n,4] * Para.Line[n,5]
+        M_line = M_line + np.inner(result.x_line[n,:], Para.Cdd_line[:,0])
+        if np.abs(M_line - S_line)/M_line <= 0.05:
+            overload.append(n)
+    return overload
 
 
 if __name__ == "__main__":
