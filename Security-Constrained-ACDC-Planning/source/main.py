@@ -458,8 +458,8 @@ def Func_Planning(Para,Info):
             expr = expr + quicksum(v_flow[N_P_conv + i,h,s,t] for i in conv_tail)
             expr = expr + v_flow[N_C_load + n,h,s,t] * factor
             for i in line_tail:  # line loss
-                R = Para.Line_R[n] * (Para.Line_K[n] ** 2)
-                # expr = expr - v_flow[N_I_line + i,h,s,t] * R
+                R = Para.Line_R[n] / (Para.Line_K[n] ** 2)
+                expr = expr - v_flow[N_I_line + i,h,s,t] * R
             if n in Para.Sub[:,1]:  # active power input from substation
                 i = int(np.where(n == Para.Sub[:,1])[0])
                 expr = expr + v_flow[N_P_sub  + i,h,s,t]
@@ -485,8 +485,8 @@ def Func_Planning(Para,Info):
             expr = expr + quicksum(v_flow[N_Q_conv + i,h,s,t] for i in conv_tail)
             expr = expr + v_flow[N_C_load + n,h,s,t] * factor
             for i in line_tail:  # line loss
-                X = Para.Line_X[n] * (Para.Line_K[n] ** 2)
-                # expr = expr - v_flow[N_I_line + i,h,s,t] * X
+                X = Para.Line_X[n] / (Para.Line_K[n] ** 2)
+                expr = expr - v_flow[N_I_line + i,h,s,t] * X
             if n in Para.Sub[:,1]:  # reactive power input from substation
                 i = int(np.where(n == Para.Sub[:,1])[0])
                 expr = expr + v_flow[N_Q_sub  + i,h,s,t]
@@ -499,8 +499,8 @@ def Func_Planning(Para,Info):
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
             bus_tail = Para.Line[n,2]
-            R = Para.Line_R[n] * (Para.Line_K[n] ** 2)
-            X = Para.Line_X[n] * (Para.Line_K[n] ** 2)
+            R = Para.Line_R[n] / (Para.Line_K[n] ** 2)
+            X = Para.Line_X[n] / (Para.Line_K[n] ** 2)
             expr = LinExpr()
             expr = expr + v_flow[N_V_bus + bus_head,h,s,t]
             expr = expr - v_flow[N_V_bus + bus_tail,h,s,t]
@@ -518,7 +518,7 @@ def Func_Planning(Para,Info):
             gen_type = int(Para.Gen[n,3])
             model.addConstr(expr == Para.Gen[n,2] * punit[gen_type + 1])
         
-        # 5.Lower and upper bounds
+        # 5. Lower and upper bounds
         # 1) voltage
         for n in range(Para.N_bus):
             V_low = Para.Volt * Para.Volt_low
@@ -526,15 +526,11 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_V_bus  + n,h,s,t] >= V_low ** 2)
             model.addConstr(v_flow[N_V_bus  + n,h,s,t] <= V_upp ** 2)
         # 2) current
-        
         for n in range(Para.N_line):
             I_low = (Para.Line_I[n] * Para.Line_K[n])
             I_upp = (Para.Line_I[n] + Para.Cdd_line[2,4]) * Para.Line_K[n]
-            model.addConstr(v_flow[N_I_line + n,h,s,t] >= y_line[n,s,t] * I_low**2)
-            model.addConstr(v_flow[N_I_line + n,h,s,t] <= y_line[n,s,t] * I_upp**2)
-            # model.addConstr(v_flow[N_I_line + n,h,s,t] >= y_line[n,s,t] * I_low ** 2)
-            # model.addConstr(v_flow[N_I_line + n,h,s,t] <= y_line[n,s,t] * I_upp ** 2)
-        
+            model.addConstr(v_flow[N_I_line + n,h,s,t] >= y_line[n,s,t] * I_low ** 2)
+            model.addConstr(v_flow[N_I_line + n,h,s,t] <= y_line[n,s,t] * I_upp ** 2)
         # 3) active power
         for n in range(Para.N_line):
             expr = LinExpr()
@@ -579,8 +575,7 @@ def Func_Planning(Para,Info):
         # 7) load shedding
         for n in range(Para.N_bus):
             model.addConstr(v_flow[N_C_load + n,h,s,t] >=  0)
-            model.addConstr(v_flow[N_C_load + n,h,s,t] <=  0)
-            #model.addConstr(v_flow[N_C_load + n,h,s,t] <=  Para.Load[n,t] * punit[0])
+            model.addConstr(v_flow[N_C_load + n,h,s,t] <=  Para.Load[n,t] * punit[0])
         # 8) renewables
         for n in range(Para.N_gen):
             gen_type = int(Para.Gen[n,3])
@@ -588,8 +583,17 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] >=  0)
             model.addConstr(v_flow[N_S_gen  + n,h,s,t] <=  expr)
             model.addConstr(v_flow[N_C_gen  + n,h,s,t] >=  0)
-            model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  0)
-            #model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
+            model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
+        
+        # 6. Second order cone
+        for n in range(Para.N_line):
+            bus_head = Para.Line[n,1]
+            expr = QuadExpr()
+            expr = expr + 4 * v_flow[N_P_line + n,h,s,t] * v_flow[N_P_line + n,h,s,t]
+            expr = expr + 4 * v_flow[N_Q_line + n,h,s,t] * v_flow[N_Q_line + n,h,s,t]
+            expr = expr + (v_flow[N_I_line + n,h,s,t] - v_flow[N_V_bus + bus_head,h,s,t]) * (v_flow[N_I_line + n,h,s,t] - v_flow[N_V_bus + bus_head,h,s,t])
+            expr = expr - (v_flow[N_I_line + n,h,s,t] + v_flow[N_V_bus + bus_head,h,s,t]) * (v_flow[N_I_line + n,h,s,t] + v_flow[N_V_bus + bus_head,h,s,t])
+            model.addConstr(expr <= 0)
         
     # Set objective
     model.addConstr(obj_normal == inv + opr * Para.N_time)
