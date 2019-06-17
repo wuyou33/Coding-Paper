@@ -38,8 +38,8 @@ class Parameter(object):
         self.Volt_upp = 1.05  # upper limit of bus valtage
         # Bus
         self.Bus  = Data[0]
-        self.Bus_AC = self.Bus[np.where(self.Bus[:,4] == 0)]  # AC bus
-        self.Bus_DC = self.Bus[np.where(self.Bus[:,4] == 1)]  # DC bus
+        self.Bus_AC = self.Bus[np.where(self.Bus[:,6] == 0)]  # AC bus
+        self.Bus_DC = self.Bus[np.where(self.Bus[:,6] == 1)]  # DC bus
         self.N_bus = len(self.Bus)  # number of bus
         self.N_bus_AC = len(self.Bus_AC)  # number of AC bus
         self.N_bus_DC = len(self.Bus_DC)  # number of DC bus
@@ -183,10 +183,10 @@ class PlotFunc(object):
         x = (Para.Bus[:,2]).copy()
         y = (Para.Bus[:,3]).copy()
         for n in range(Para.N_bus):  # Bus
-            if Para.Bus[n,4] == 0:
+            if Para.Bus[n,6] == 0:
                 plt.text(x[n]+2,y[n]+2, '%s'%n)
                 plt.plot(x[n],y[n],'r.')
-            if Para.Bus[n,4] == 1:
+            if Para.Bus[n,6] == 1:
                 x[n] = x[n] + 200
                 y[n] = y[n] + 25
                 plt.text(x[n]+2,y[n]+2, '%s'%n)
@@ -444,8 +444,8 @@ def Func_Planning(Para,Info):
         # 1.nodal active power balance
         for n in range(Para.N_bus):
             # Bus-Branch information
-            if Para.Bus[n,4] == 0: factor = math.sin(Para.Factor)  # AC bus
-            if Para.Bus[n,4] == 1: factor = 1                      # DC bus
+            if Para.Bus[n,6] == 0: factor = math.sin(Para.Factor)  # AC bus
+            if Para.Bus[n,6] == 1: factor = 1                      # DC bus
             line_head = Info.Line_head[n]
             line_tail = Info.Line_tail[n]
             conv_head = Info.Conv_head[n]
@@ -471,8 +471,8 @@ def Func_Planning(Para,Info):
         # 2.nodal reactive power balance
         for n in range(Para.N_bus_AC):
             # Bus-Branch information
-            if Para.Bus[n,4] == 0: factor = math.cos(Para.Factor)  # AC bus
-            if Para.Bus[n,4] == 1: factor = 0                      # DC bus
+            if Para.Bus[n,6] == 0: factor = math.cos(Para.Factor)  # AC bus
+            if Para.Bus[n,6] == 1: factor = 0                      # DC bus
             line_head = Info.Line_head[n]
             line_tail = Info.Line_tail[n]
             conv_head = Info.Conv_head[n]
@@ -586,7 +586,8 @@ def Func_Planning(Para,Info):
             model.addConstr(v_flow[N_C_gen  + n,h,s,t] <=  expr)
         
         # 6. Second order cone
-        for n in range(Para.N_line):
+        '''
+        for n in range(Para.N_line_AC):
             bus_head = Para.Line[n,1]
             expr = QuadExpr()
             expr = expr + 4 * v_flow[N_P_line + n,h,s,t] * v_flow[N_P_line + n,h,s,t]
@@ -594,7 +595,7 @@ def Func_Planning(Para,Info):
             expr = expr + (v_flow[N_I_line + n,h,s,t] - v_flow[N_V_bus + bus_head,h,s,t]) * (v_flow[N_I_line + n,h,s,t] - v_flow[N_V_bus + bus_head,h,s,t])
             expr = expr - (v_flow[N_I_line + n,h,s,t] + v_flow[N_V_bus + bus_head,h,s,t]) * (v_flow[N_I_line + n,h,s,t] + v_flow[N_V_bus + bus_head,h,s,t])
             model.addConstr(expr <= 0)
-        
+        '''
     # Set objective
     model.addConstr(obj_normal == inv + opr * Para.N_time)
     model.setObjective(obj_normal, GRB.MINIMIZE)
