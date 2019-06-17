@@ -94,7 +94,7 @@ class Parameter(object):
             [ 60, 36934]]
             )
         self.N_type_sub = len(self.Cdd_sub)
-        # conversion and standardization
+        # Conversion and standardization
         self.Line_R = np.zeros(self.N_line)  # resistance
         self.Line_X = np.zeros(self.N_line)  # reactance
         self.Line_G = np.zeros(self.N_line)  # conductance
@@ -109,6 +109,15 @@ class Parameter(object):
             self.Line_X[n] = X / self.Base_Z
             self.Line_G[n] = Y.real
             self.Line_B[n] = Y.imag
+        # Admittance matrix
+        self.Y = np.zeros((self.N_bus_AC,self.N_bus_AC), dtype = complex)
+        for n in range(self.N_line_AC):
+            bus_head = int(self.Line[n,1])
+            bus_tail = int(self.Line[n,2])
+            self.Y[bus_head,bus_tail] = -np.complex(self.Line_G[n], self.Line_B[n])
+            self.Y[bus_tail,bus_head] = -np.complex(self.Line_G[n], self.Line_B[n])
+        for n in range(self.N_bus_AC):
+            self.Y[n,n] = -self.Y.sum(axis = 0)[n]
 
 
 # This class builds the infomation for each bus i, including the 
@@ -227,12 +236,12 @@ def GlobalVar(Para):
     global Big_M
     Big_M = 10
     # 2.Power flow index
-    global N_V_bus, N_I_line, N_P_line, N_Q_line, N_P_conv, N_Q_conv
-    global N_P_sub, N_Q_sub , N_C_load, N_S_gen , N_C_gen , N_N_var
+    global N_V_bus, N_T_bus, N_P_line, N_Q_line, N_P_conv, N_Q_conv
+    global N_P_sub, N_Q_sub, N_C_load, N_S_gen , N_C_gen , N_N_var
     # Initialization
-    N_V_bus  = 0                       # square of bus voltage
-    N_I_line = N_V_bus  + Para.N_bus   # square of line current
-    N_P_line = N_I_line + Para.N_line  # active power flow
+    N_V_bus  = 0                       # voltage amplitude (square)
+    N_T_bus  = N_V_bus  + Para.N_bus   # voltage phase angle
+    N_P_line = N_T_bus  + Para.N_bus   # active power flow
     N_Q_line = N_P_line + Para.N_line  # reactive power flow
     N_P_conv = N_Q_line + Para.N_line  # active power flow
     N_Q_conv = N_P_conv + Para.N_conv  # reactive power compensation
@@ -447,7 +456,7 @@ def Func_Planning(Para,Info):
         # 0.data of unit
         n_row = math.floor(s%4) * 6 + h
         n_col = math.floor(s/4) * 4
-        punit = Para.Day[n_row, n_col:n_col+4]
+        punit = Para.Day[n_row, n_col: n_col + 4]
 
         # 1.nodal active power balance
         for n in range(Para.N_bus):
@@ -465,17 +474,12 @@ def Func_Planning(Para,Info):
             expr = expr - quicksum(v_flow[N_P_conv + i,h,s,t] for i in conv_head)
             expr = expr + quicksum(v_flow[N_P_conv + i,h,s,t] for i in conv_tail)
             expr = expr + v_flow[N_C_load + n,h,s,t] * factor
-            '''
-            for i in line_tail:  # line loss
-                R = Para.Line_R[n] / (Para.Line_K[n] ** 2)
-                expr = expr - v_flow[N_I_line + i,h,s,t] * R
-            '''
             if n in Para.Sub[:,1]:  # active power input from substation
                 i = int(np.where(n == Para.Sub[:,1])[0])
-                expr = expr + v_flow[N_P_sub  + i,h,s,t]
+                expr = expr + v_flow[N_P_sub + i,h,s,t]
             if n in Para.Gen[:,1]:  # active power input from renewables
                 i = int(np.where(n == Para.Gen[:,1])[0])
-                expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
+                expr = expr + v_flow[N_S_gen + i,h,s,t] * factor
             model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor / Para.Base_S)
         
         # 2.nodal reactive power balance
@@ -494,11 +498,6 @@ def Func_Planning(Para,Info):
             expr = expr - quicksum(v_flow[N_Q_conv + i,h,s,t] for i in conv_head)
             expr = expr + quicksum(v_flow[N_Q_conv + i,h,s,t] for i in conv_tail)
             expr = expr + v_flow[N_C_load + n,h,s,t] * factor
-            '''
-            for i in line_tail:  # line loss
-                X = Para.Line_X[n] / (Para.Line_K[n] ** 2)
-                expr = expr - v_flow[N_I_line + i,h,s,t] * X
-            '''
             if n in Para.Sub[:,1]:  # reactive power input from substation
                 i = int(np.where(n == Para.Sub[:,1])[0])
                 expr = expr + v_flow[N_Q_sub  + i,h,s,t]
@@ -506,7 +505,7 @@ def Func_Planning(Para,Info):
                 i = int(np.where(n == Para.Gen[:,1])[0])
                 expr = expr + v_flow[N_S_gen  + i,h,s,t] * factor
             model.addConstr(expr == Para.Load[n,t+1] * punit[0] * factor / Para.Base_S)
-        '''
+        
         # 3.Voltage balance on line
         for n in range(Para.N_line):
             bus_head = Para.Line[n,1]
@@ -521,7 +520,7 @@ def Func_Planning(Para,Info):
             expr = expr + v_flow[N_I_line + n,h,s,t] * (R ** 2 + X ** 2)
             model.addConstr(expr >= -Big_M * (1 - y_line[n,s,t]))
             model.addConstr(expr <=  Big_M * (1 - y_line[n,s,t]))
-        '''
+        
         # 4.Renewable generation
         for n in range(Para.N_gen):
             expr = LinExpr()
